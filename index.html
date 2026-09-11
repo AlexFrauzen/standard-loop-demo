@@ -7,20 +7,28 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
   <title>Standard Reserve Loop Demo</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%231c42cc'/%3E%3Cpath d='M23 9H10v7h12v7H9' fill='none' stroke='white' stroke-width='3'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="styles.css">
-  <script src="app.js" defer></script>
+  <link rel="stylesheet" href="styles.css?v=3">
+  <script src="app.js?v=3" defer></script>
 </head>
 <body>
   <div class="notice" role="note"><span class="notice-tag">PUBLIC RULES / TOY INPUTS</span><span>Rules from the public whitepaper. The numbers you enter are not live Standard parameters. There is no token or mint yet.</span></div>
   <header class="masthead"><div><p class="eyebrow">MECHANICS CALCULATOR <span>01 / LOCAL</span></p><h1>Standard Reserve <span>Loop Demo</span></h1></div><a href="https://www.standardreserve.xyz/whitepaper/" target="_blank" rel="noopener noreferrer">Whitepaper v0.1 <span aria-hidden="true">↗</span></a></header>
   <main>
-    <div class="toolbar"><div class="modes" role="group" aria-label="Calculation mode"><button type="button" id="disclosed-mode" aria-pressed="true">Disclosed only</button><button type="button" id="sandbox-mode" aria-pressed="false">Sandbox</button></div><p id="mode-note">Published rules. Issuance volume is a toy example.</p><a class="mobile-jump" href="#results">View calculation ↓</a></div>
+    <div class="toolbar"><div class="modes" role="group" aria-label="Calculation mode"><button type="button" id="simple-mode" aria-pressed="true">Simple</button><button type="button" id="disclosed-mode" aria-pressed="false">Disclosed only</button><button type="button" id="sandbox-mode" aria-pressed="false">Sandbox</button></div><p id="mode-note">Start with an example. Change what your charter does.</p><a class="mobile-jump" href="#results">View calculation ↓</a></div>
     <div class="workspace">
       <section class="inputs" aria-labelledby="inputs-heading">
         <div class="section-heading"><h2 id="inputs-heading">Your scenario</h2><span class="eyebrow">INPUT</span></div>
         <div class="presets" role="group" aria-label="Toy scenarios"><button type="button" data-preset="low">TOY Low</button><button type="button" data-preset="mid" aria-pressed="true">TOY Mid</button><button type="button" data-preset="high">TOY High</button><button type="button" class="reset" id="reset">Reset</button></div>
-        <p class="caption">One charter. One fixed-branch interval. All scenario values are examples.</p>
-        <form id="scenario" novalidate>
+        <p class="caption" id="input-caption">Try adding a branch, then retiring one. No setup needed.</p>
+        <div id="simple-controls">
+          <div class="simple-intro"><span class="tag">START HERE</span><p>A charter is your bank. Its branches each earn an equal share of issuance.</p></div>
+          <div class="simple-action"><div class="action-heading"><span class="step-number">1</span><h3>Add branches</h3></div><p>More branches give you a larger share. Each new branch needs a license; its payment is burned.</p><div class="stepper"><button type="button" data-simple-action="remove-license" aria-label="One fewer new branch">−</button><output id="simple-licenses" aria-label="New branches">0</output><button type="button" data-simple-action="add-license" aria-label="Add one new branch">+</button></div><small id="simple-license-limit"></small></div>
+          <div class="simple-action"><div class="action-heading"><span class="step-number">2</span><h3>Retire branches</h3></div><p>Release part of your balance by closing branches. Those branches stop earning.</p><div class="stepper"><button type="button" data-simple-action="restore-branch" aria-label="Retire one fewer branch">−</button><output id="simple-retire" aria-label="Branches to retire">0</output><button type="button" data-simple-action="retire-branch" aria-label="Retire one more branch">+</button></div><small>After the example earning interval.</small></div>
+          <div class="simple-action"><div class="action-heading"><span class="step-number">3</span><h3>Change the ETH flow</h3></div><div class="flow-toggle" role="group" aria-label="Toy ETH flow"><button type="button" data-simple-flow="in" aria-pressed="true">More coming in</button><button type="button" data-simple-flow="out" aria-pressed="false">More going out</button></div><p>See where protocol ETH goes in each case.</p></div>
+          <details class="input-group"><summary>Try an exit fee <small>OPTIONAL</small></summary><div class="fields"><div class="field wide unpublished"><label for="simple-fee">Your test exit fee</label><div class="input-wrap"><input type="number" id="simple-fee" min="0" max="100" step="any" placeholder="Enter value" inputmode="decimal" aria-describedby="simple-fee-hint"><span class="unit">%</span></div><small id="simple-fee-hint">not published — your input</small></div></div><p class="group-note">Optional. Without a fee, the released balance is known but the net wallet amount stays unknown.</p></details>
+          <details class="input-group"><summary>What is in this example?</summary><div id="simple-assumptions"></div><p class="group-note">These are toy observations, not protocol parameters. Simple uses a separate example; your detailed inputs are preserved when switching modes.</p><button type="button" id="edit-example" class="text-button">Edit this example in Disclosed only ↗</button></details>
+        </div>
+        <form id="scenario" novalidate hidden>
           <div id="input-groups"></div>
           <div id="sandbox-fields" hidden></div>
         </form>
@@ -29,7 +37,7 @@
       <section class="results" id="results" aria-labelledby="results-heading">
         <div class="section-heading"><h2 id="results-heading">The disclosed loop</h2><span class="eyebrow" id="scenario-status">TOY Mid</span></div>
         <div id="calculation"></div>
-        <div class="loop"><h3>Four steps</h3><ol><li><span>01</span> A charter holds branches; each branch earns an equal share.</li><li><span>02</span> Licenses add branches; the STANDARD payment is burned.</li><li><span>03</span> Retiring branches releases a pro rata balance; withdrawal mints to the wallet, less the fee.</li><li><span>04</span> ETH funds reserves or buybacks, liquidity, and the team.</li></ol></div>
+        <div class="loop" id="text-loop" hidden><h3>Four steps</h3><ol><li><span>01</span> A charter holds branches; each branch earns an equal share.</li><li><span>02</span> Licenses add branches; the STANDARD payment is burned.</li><li><span>03</span> Retiring branches releases a pro rata balance; withdrawal mints to the wallet, less the fee.</li><li><span>04</span> ETH funds reserves or buybacks, liquidity, and the team.</li></ol></div>
       </section>
     </div>
     <footer><span>Offline calculation · No wallet · No price model</span><span>Rules: whitepaper §§3–9, 11 · Unpublished values stay blank</span></footer>
