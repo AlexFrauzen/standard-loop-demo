@@ -121,7 +121,7 @@ function calculate(s) {
   const accrual=issued===null?null:issued*share;
   const closingBalance=accrual===null?null:s.balance+accrual;
   const released=s.retire===0?0:closingBalance===null?null:closingBalance*s.retire/b;
-  const rate=sandbox?s.exitFee:null;
+  const rate=sandbox||s.mode==='simple'?s.exitFee:null;
   const fee=released===0?0:has(released,rate)?released*rate/100:null;
   const wallet=has(released,fee)?released-fee:null;
   const licensePrice=sandbox?auctionPrice(s.licenseFloor,s.licenseLast,s.licenseHadSales!=='no',s.auctionHour,2):null;
@@ -145,7 +145,7 @@ function validate(s) {
   for(const f of ALL_FIELDS) {
     const [id,label,unit,min,max,step]=f;
     if(id==='exampleIssue' && s.mode==='sandbox') continue;
-    if((UNKNOWN_IDS.includes(id)||SANDBOX_SCENARIO.fields.some(x=>x[0]===id)) && s.mode!=='sandbox') continue;
+    if((UNKNOWN_IDS.includes(id)||SANDBOX_SCENARIO.fields.some(x=>x[0]===id)) && s.mode!=='sandbox' && !(s.mode==='simple'&&id==='exitFee')) continue;
     if(unit===null) continue;
     const value=s[id];
     if(value===null && OPTIONAL_IDS.has(id)) continue;
@@ -230,12 +230,50 @@ function render(s,r) {
   return html;
 }
 
+function simpleSnapshot(name,licenses=0,retire=0,direction='in',exitFee=null) {
+  const toy=TOY[name];
+  if(!toy) throw new Error('Unknown toy preset.');
+  const incoming=Math.max(toy.buyEth,toy.sellEth),outgoing=Math.min(toy.buyEth,toy.sellEth);
+  return {...Object.fromEntries(ALL_FIELDS.map(f=>[f[0],null])),...toy,mode:'simple',licenses,retire,exitFee,
+    buyEth:direction==='in'?incoming:outgoing,sellEth:direction==='in'?outgoing:incoming,
+    issuedToDate:0,boughtToday:0,soldToday:0,auctionHour:12,licenseHadSales:'yes',charterHadSales:'yes'};
+}
+
+function renderInfographic(s,r) {
+  const display = value => s.mode !== 'simple' ? fmt(value) : !has(value) ? '—' : value !== 0 && Math.abs(value) < 0.01 ? value.toExponential(2) : new Intl.NumberFormat('en-US',{maximumFractionDigits:2}).format(value);
+  const branchTiles=Array.from({length:10},(_,i)=>`<span class="charter-tile ${i<s.branches?'existing':i<r.b?'new':''}" aria-hidden="true">${i<r.b?i+1:'·'}</span>`).join('');
+  const afterTiles=Array.from({length:10},(_,i)=>`<span class="after-tile ${i<r.remainingBranches?'kept':i<r.b?'retired':''}" aria-hidden="true">${i<r.remainingBranches?'':i<r.b?'×':''}</span>`).join('');
+  const amount=(n)=>n===null?'Unknown':display(n);
+  const exitNote=s.retire===0?'No branches retired. Nothing is minted.':r.wallet===null?'The exit fee is unpublished. Net wallet tokens stay unknown until you enter a test fee.':`Your entered fee is ${display(r.rate)}%. It is a test input.`;
+  return `<figure class="loop-graphic" aria-label="Live diagram of the toy charter, ledger, withdrawal and separate ETH flow">
+    <figcaption><span class="eyebrow">FOLLOW THE EXAMPLE</span><span class="tag">§§5, 7, 9, 11</span></figcaption>
+    <div class="graphic-charter"><div><h3>Your charter</h3><p><strong>${s.branches}</strong> existing + <strong>${s.licenses}</strong> planned = <strong>${r.b}</strong> branches</p><div class="charter-tiles" aria-label="${r.b} of 10 branch slots">${branchTiles}</div><p class="tile-key"><span class="key-existing"></span>Existing <span class="key-new"></span>New <span class="key-empty"></span>Empty</p></div><div class="graphic-share"><span>Your share this interval</span><strong>${display(r.share*100)}%</strong><p class="formula">${r.b} ÷ ${display(r.n)} × 100</p><small>Before adding: ${display(s.branches/s.total*100)}%<br>share = existing ÷ total × 100</small></div></div>
+    <div class="license-sink"><span aria-hidden="true">↳</span><div><strong>License payment → burn</strong><p>${s.licenses===0?'No licenses selected.':r.licenseBurn===null?'Planned branches only; the payment amount is unknown.':`${display(r.licenseBurn)} STANDARD burned.`}</p><span class="formula">burn = licenses × price × 100%</span></div></div>
+    <div class="flow-connector"><span aria-hidden="true">↓</span> Equal share of the example issuance</div>
+    <div class="ledger-node"><div><h3>Accrued inside the bank</h3><strong class="diagram-number">${amount(r.accrual)} <small>STANDARD</small></strong><p class="formula">credit = ${amount(r.issued)} × ${r.b} / ${display(r.n)}</p></div><div class="mint-stamp"><strong>0</strong><span>tokens minted<br>from accrual</span></div></div>
+    <div class="flow-connector"><span aria-hidden="true">↓</span> Retire ${s.retire} of ${r.b} branches</div>
+    <div class="withdrawal-node"><div><h3>Balance released for withdrawal</h3><strong class="diagram-number">${amount(r.released)} <small>STANDARD</small></strong><p class="formula">(${display(s.balance)} opening + ${amount(r.accrual)} credit) × ${s.retire} / ${r.b}</p></div><p class="exit-note">${exitNote}</p></div>
+    <div class="destination-label">Released balance splits into</div>
+    <div class="withdrawal-destinations">
+      <div class="destination wallet"><span class="destination-type">YOUR WALLET</span><strong>${amount(r.wallet)}</strong><span>STANDARD minted to you</span><p class="formula">released − fee</p></div>
+      <div class="destination burn"><span class="destination-type">BURNED</span><strong>${amount(r.feeBurn)}</strong><span>STANDARD from the fee</span><p class="formula">fee × 50%</p></div>
+      <div class="destination stayers"><span class="destination-type">REMAINING BANKERS</span><strong>${amount(r.redistributed)}</strong><span>STANDARD allocated</span><p class="formula">fee × 50%</p></div>
+    </div><p class="fee-formula formula">fee = released × ${r.rate===null?'entered fee':display(r.rate)} / 100</p>
+    <div class="after-retirement"><div><strong>${r.remainingBranches} branches left</strong><p class="formula">${r.b} − ${s.retire}; retained balance = ${amount(r.closingBalance)} − ${amount(r.released)} = ${amount(r.retained)} STD</p><p>${r.remainingBranches===0?'The charter burns. Re-entry needs a new charter.':'Only the remaining branches earn in later intervals.'}</p></div><div class="after-tiles" aria-label="${r.remainingBranches} branches remain, ${s.retire} retired">${afterTiles}</div></div>
+    <div class="eth-diagram"><div class="eth-heading"><div><span class="eyebrow">SEPARATE ETH FLOW</span><h3>${r.regime==='Expansion'?'More ETH comes in':'ETH goes out or net flow is zero'}</h3><p class="formula">net = ${display(s.buyEth)} buys − ${display(s.sellEth)} sells = ${display(r.net)} ETH</p></div><span class="regime-label">${r.regime}</span></div><p class="eth-source">${display(r.eth)} ETH to split <span class="formula">= ${display(s.feeEth)} trading fees + ${display(s.charterEth)} charter proceeds</span></p><div class="eth-distribution" role="img" aria-label="ETH allocation: 70 percent vault, 15 percent liquidity, 15 percent team"><span>70%</span><span>15%</span><span>15%</span></div><div class="eth-destinations"><div><strong>${r.regime==='Expansion'?'Reserves':'Buyback & burn'}</strong><span>${display(r.vault)} ETH</span><p class="formula">total × 70%</p></div><div><strong>Liquidity</strong><span>${display(r.pol)} ETH</span><p class="formula">total × 15%</p></div><div><strong>Team</strong><span>${display(r.team)} ETH</span><p class="formula">total × 15%</p></div></div><p class="graphic-note">${r.regime==='Expansion'?'The active vault accumulates reserves.':'The active vault buys STANDARD and burns it. Token quantity needs a price and is not calculated.'} Changing this flow does not calculate a new issuance rate.</p></div>
+  <p class="graphic-note">Toy snapshot. Display rounded; calculations use unrounded values.</p></figure>`;
+}
+
 function boot() {
-  let mode='disclosed';
+  let mode='simple',simpleName='mid',simpleLicenses=0,simpleRetire=0,simpleDirection='in',advancedPreset='mid';
   const form=document.getElementById('scenario');
   document.getElementById('input-groups').innerHTML=SCENARIO_FIELDS.map(g=>groupHTML(g)).join('');
   document.getElementById('sandbox-fields').innerHTML='<p class="sandbox-label">Unpublished parameters<br><small>Blank means unknown. Zero is an explicit input.</small></p>'+UNKNOWN_GROUPS.map(g=>groupHTML(g,true)).join('')+groupHTML(SANDBOX_SCENARIO);
   function read() {
+    if(mode==='simple') {
+      const input=document.getElementById('simple-fee');
+      return simpleSnapshot(simpleName,simpleLicenses,simpleRetire,simpleDirection,input.validity.badInput?NaN:input.value.trim()===''?null:Number(input.value));
+    }
     const s={mode};
     for(const f of ALL_FIELDS) {
       const el=document.getElementById(f[0]);
@@ -247,10 +285,29 @@ function boot() {
   }
   function update() {
     const s=read(),errors=validate(s);
+    const simple=mode==='simple';
+    document.getElementById('simple-fee').setAttribute('aria-invalid',String(simple&&errors.some(e=>e.id==='exitFee')));
+    document.getElementById('scenario-status').textContent=simple?`TOY ${simpleName[0].toUpperCase()+simpleName.slice(1)}`:advancedPreset?`TOY ${advancedPreset[0].toUpperCase()+advancedPreset.slice(1)}`:'CUSTOM / TOY';
+    document.querySelectorAll('[data-preset]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.preset===(simple?simpleName:advancedPreset))));
+    if(simple) {
+      const limit=Math.min(3,10-s.branches);
+      document.getElementById('simple-licenses').textContent=`${simpleLicenses} new`;
+      document.getElementById('simple-retire').textContent=`${simpleRetire} retired`;
+      document.getElementById('simple-license-limit').textContent=`Up to ${limit} new branches here: daily limit 3, charter limit 10.`;
+      for(const [action,disabled] of [['remove-license',simpleLicenses===0],['add-license',simpleLicenses>=limit],['restore-branch',simpleRetire===0],['retire-branch',simpleRetire>=s.branches+simpleLicenses]]) document.querySelector(`[data-simple-action="${action}"]`).disabled=disabled;
+      document.querySelectorAll('[data-simple-flow]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.simpleFlow===simpleDirection)));
+      document.getElementById('simple-assumptions').innerHTML=`<dl class="assumptions"><dt>Existing branches: yours / total</dt><dd>${s.branches} / ${fmt(s.total)}</dd><dt>Issuance in the example interval</dt><dd>${fmt(s.exampleIssue)} STANDARD</dd><dt>Your opening ledger balance</dt><dd>${fmt(s.balance)} STANDARD</dd><dt>Current buys / sells</dt><dd>${fmt(s.buyEth)} / ${fmt(s.sellEth)} ETH</dd><dt>Trading fees / charter proceeds</dt><dd>${fmt(s.feeEth)} / ${fmt(s.charterEth)} ETH</dd><dt>Prior issuance / licenses sold today</dt><dd>0 / 0</dd></dl>`;
+    }
     for(const f of ALL_FIELDS) document.getElementById(f[0]).setAttribute('aria-invalid',String(errors.some(e=>e.id===f[0])));
-    document.getElementById('calculation').innerHTML=errors.length?`<div class="error" role="status"><p>Check your scenario</p><ul>${errors.map(e=>`<li>${esc(e.text)}</li>`).join('')}</ul><p>Calculation paused until these inputs are valid.</p></div>`:render(s,calculate(s));
+    const r=errors.length?null:calculate(s);
+    document.getElementById('calculation').innerHTML=errors.length?`<div class="error" role="status"><p>Check your scenario</p><ul>${errors.map(e=>`<li>${esc(e.text)}</li>`).join('')}</ul><p>Calculation paused until these inputs are valid.</p></div>`:simple?renderInfographic(s,r):`<details class="diagram-details"><summary>See the loop as a diagram</summary>${renderInfographic(s,r)}</details>`+render(s,r);
   }
   function preset(name) {
+    if(mode==='simple') {
+      simpleName=name;simpleLicenses=0;simpleRetire=0;simpleDirection=TOY[name].buyEth>TOY[name].sellEth?'in':'out';
+      document.getElementById('simple-fee').value='';update();return;
+    }
+    advancedPreset=name;
     for(const f of ALL_FIELDS) document.getElementById(f[0]).value='';
     const values={...TOY[name],issuedToDate:0,boughtToday:0,soldToday:0,auctionHour:12};
     for(const [k,v] of Object.entries(values)) document.getElementById(k).value=v;
@@ -262,22 +319,51 @@ function boot() {
   }
   function setMode(value) {
     mode=value;
+    document.getElementById('simple-controls').hidden=mode!=='simple';
+    form.hidden=mode==='simple';
+    document.getElementById('text-loop').hidden=mode==='simple';
     document.getElementById('sandbox-fields').hidden=mode!=='sandbox';
+    document.getElementById('simple-mode').setAttribute('aria-pressed',String(mode==='simple'));
     document.getElementById('disclosed-mode').setAttribute('aria-pressed',String(mode==='disclosed'));
     document.getElementById('sandbox-mode').setAttribute('aria-pressed',String(mode==='sandbox'));
-    document.getElementById('mode-note').textContent=mode==='sandbox'?'Unpublished parameters are manual. Blank inputs keep dependent results unresolved.':'Published rules. Issuance volume is a toy example.';
+    document.getElementById('mode-note').textContent=mode==='simple'?'Start with an example. Change what your charter does.':mode==='sandbox'?'Unpublished parameters are manual. Blank inputs keep dependent results unresolved.':'Published rules. Issuance volume is a toy example.';
+    document.getElementById('input-caption').textContent=mode==='simple'?'Try adding a branch, then retiring one. No setup needed.':'One charter. One fixed-branch interval. All scenario values are examples.';
     document.getElementById('exampleIssue').disabled=mode==='sandbox';
     document.getElementById('exampleIssue-hint').textContent=mode==='sandbox'?'Not used in Sandbox; enter base, d and m below.':'Toy interval volume; not a published rate';
     update();
   }
   form.addEventListener('submit',event=>event.preventDefault());
-  form.addEventListener('input',()=>{document.querySelectorAll('[data-preset]').forEach(b=>b.setAttribute('aria-pressed','false'));document.getElementById('scenario-status').textContent='CUSTOM / TOY';update();});
+  form.addEventListener('input',()=>{advancedPreset=null;update();});
   form.addEventListener('change',update);
   document.querySelectorAll('[data-preset]').forEach(b=>b.addEventListener('click',()=>preset(b.dataset.preset)));
-  document.getElementById('reset').addEventListener('click',()=>{preset('mid');setMode('disclosed');});
+  document.getElementById('reset').addEventListener('click',()=>preset('mid'));
+  document.getElementById('simple-mode').addEventListener('click',()=>setMode('simple'));
   document.getElementById('disclosed-mode').addEventListener('click',()=>setMode('disclosed'));
   document.getElementById('sandbox-mode').addEventListener('click',()=>setMode('sandbox'));
-  preset('mid');
+  document.getElementById('simple-fee').addEventListener('input',update);
+  document.querySelector('.mobile-jump').addEventListener('click',event=>{
+    event.preventDefault();document.getElementById('results').scrollIntoView({block:'start'});
+  });
+  document.querySelectorAll('[data-simple-action]').forEach(button=>button.addEventListener('click',()=>{
+    const action=button.dataset.simpleAction;
+    const max=Math.min(3,10-TOY[simpleName].branches);
+    if(action==='add-license') simpleLicenses=Math.min(max,simpleLicenses+1);
+    if(action==='remove-license') simpleLicenses=Math.max(0,simpleLicenses-1);
+    if(action==='retire-branch') simpleRetire++;
+    if(action==='restore-branch') simpleRetire--;
+    simpleRetire=Math.max(0,Math.min(simpleRetire,TOY[simpleName].branches+simpleLicenses));
+    update();
+  }));
+  document.querySelectorAll('[data-simple-flow]').forEach(button=>button.addEventListener('click',()=>{simpleDirection=button.dataset.simpleFlow;update();}));
+  document.getElementById('edit-example').addEventListener('click',()=>{
+    const snapshot=read();
+    for(const f of ALL_FIELDS) document.getElementById(f[0]).value=snapshot[f[0]]??'';
+    document.getElementById('licenseHadSales').value=snapshot.licenseHadSales;
+    document.getElementById('charterHadSales').value=snapshot.charterHadSales;
+    advancedPreset=null;setMode('disclosed');
+  });
+  // Initialize the detailed model too, while opening the novice view by default.
+  mode='disclosed';preset('mid');setMode('simple');
   // Optional local browser interface. No connector or network is involved.
   if(document.modelContext?.registerTool) {
     const lifecycle=new AbortController();
@@ -293,7 +379,7 @@ function boot() {
       }
     },{
       name:'set_toy_preset',title:'Set toy preset',
-      description:'Replace local scenario values with a TOY preset and clear all unpublished inputs. Keeps the selected mode. No transaction occurs.',
+      description:'Replace the selected mode’s local scenario with a TOY preset and clear its unpublished inputs. Other modes may retain their inputs. No transaction occurs.',
       inputSchema:{type:'object',properties:{preset:{type:'string',enum:['low','mid','high']}},required:['preset'],additionalProperties:false},
       annotations:{readOnlyHint:false,untrustedContentHint:false},
       execute(input){
@@ -309,4 +395,4 @@ function boot() {
   }
 }
 if(typeof document!=='undefined') boot();
-if(typeof module!=='undefined') module.exports={RULES,TOY,UNKNOWN_IDS,ALL_FIELDS,calculate,validate,auctionPrice,render};
+if(typeof module!=='undefined') module.exports={RULES,TOY,UNKNOWN_IDS,ALL_FIELDS,calculate,validate,auctionPrice,render,simpleSnapshot,renderInfographic};
